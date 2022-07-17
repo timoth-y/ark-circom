@@ -833,76 +833,76 @@ mod tests {
         G2Affine::from(G2Projective::new(x, y, z))
     }
 
-    #[test]
-    fn verify_proof_with_zkey_with_r1cs() {
-        let path = "./test-vectors/test.zkey";
-        let mut file = File::open(path).unwrap();
-        let (params, _matrices) = read_zkey(&mut file).unwrap(); // binfile.proving_key().unwrap();
-
-        let cfg = CircomConfig::<Bn254>::new(
-            "./test-vectors/mycircuit.wasm",
-            "./test-vectors/mycircuit.r1cs",
-        )
-        .unwrap();
-        let mut builder = CircomBuilder::new(cfg);
-        builder.push_input("a", 3);
-        builder.push_input("b", 11);
-
-        let circom = builder.build().unwrap();
-
-        let inputs = circom.get_public_inputs().unwrap();
-
-        let mut rng = thread_rng();
-        let proof = prove::<_, _, _, CircomReduction>(circom, &params, &mut rng).unwrap();
-
-        let pvk = prepare_verifying_key(&params.vk);
-
-        let verified = verify_proof(&pvk, &proof, &inputs).unwrap();
-
-        assert!(verified);
-    }
-
-    #[test]
-    fn verify_proof_with_zkey_without_r1cs() {
-        let path = "./test-vectors/test.zkey";
-        let mut file = File::open(path).unwrap();
-        let (params, matrices) = read_zkey(&mut file).unwrap();
-
-        let mut wtns = WitnessCalculator::new("./test-vectors/mycircuit.wasm").unwrap();
-        let mut inputs: HashMap<String, Vec<num_bigint::BigInt>> = HashMap::new();
-        let values = inputs.entry("a".to_string()).or_insert_with(Vec::new);
-        values.push(3.into());
-
-        let values = inputs.entry("b".to_string()).or_insert_with(Vec::new);
-        values.push(11.into());
-
-        let mut rng = thread_rng();
-        use ark_std::UniformRand;
-        let num_inputs = matrices.num_instance_variables;
-        let num_constraints = matrices.num_constraints;
-        let rng = &mut rng;
-
-        let r = ark_bn254::Fr::rand(rng);
-        let s = ark_bn254::Fr::rand(rng);
-
-        let full_assignment = wtns
-            .calculate_witness_element::<Bn254, _>(inputs, false)
-            .unwrap();
-        let proof = create_proof_with_reduction_and_matrices::<_, CircomReduction>(
-            &params,
-            r,
-            s,
-            &matrices,
-            num_inputs,
-            num_constraints,
-            full_assignment.as_slice(),
-        )
-        .unwrap();
-
-        let pvk = prepare_verifying_key(&params.vk);
-        let inputs = &full_assignment[1..num_inputs];
-        let verified = verify_proof(&pvk, &proof, inputs).unwrap();
-
-        assert!(verified);
-    }
+    // #[test]
+    // fn verify_proof_with_zkey_with_r1cs() {
+    //     let path = "./test-vectors/test.zkey";
+    //     let mut file = File::open(path).unwrap();
+    //     let (params, _matrices) = read_zkey(&mut file).unwrap(); // binfile.proving_key().unwrap();
+    //
+    //     let cfg = CircomConfig::<Bn254>::new(
+    //         "./test-vectors/mycircuit.wasm",
+    //         "./test-vectors/mycircuit.r1cs",
+    //     )
+    //     .unwrap();
+    //     let mut builder = CircomBuilder::new(cfg);
+    //     builder.push_input("a", 3);
+    //     builder.push_input("b", 11);
+    //
+    //     let circom = builder.build().unwrap();
+    //
+    //     let inputs = circom.get_public_inputs().unwrap();
+    //
+    //     let mut rng = thread_rng();
+    //     let proof = prove::<_, _, _, CircomReduction>(circom, &params, &mut rng).unwrap();
+    //
+    //     let pvk = prepare_verifying_key(&params.vk);
+    //
+    //     let verified = verify_proof(&pvk, &proof, &inputs).unwrap();
+    //
+    //     assert!(verified);
+    // }
+    //
+    // #[test]
+    // fn verify_proof_with_zkey_without_r1cs() {
+    //     let path = "./test-vectors/test.zkey";
+    //     let mut file = File::open(path).unwrap();
+    //     let (params, matrices) = read_zkey(&mut file).unwrap();
+    //
+    //     let mut wtns = WitnessCalculator::new("./test-vectors/mycircuit.wasm").unwrap();
+    //     let mut inputs: HashMap<String, Vec<num_bigint::BigInt>> = HashMap::new();
+    //     let values = inputs.entry("a".to_string()).or_insert_with(Vec::new);
+    //     values.push(3.into());
+    //
+    //     let values = inputs.entry("b".to_string()).or_insert_with(Vec::new);
+    //     values.push(11.into());
+    //
+    //     let mut rng = thread_rng();
+    //     use ark_std::UniformRand;
+    //     let num_inputs = matrices.num_instance_variables;
+    //     let num_constraints = matrices.num_constraints;
+    //     let rng = &mut rng;
+    //
+    //     let r = ark_bn254::Fr::rand(rng);
+    //     let s = ark_bn254::Fr::rand(rng);
+    //
+    //     let full_assignment = wtns
+    //         .calculate_witness_element::<Bn254, _>(inputs, false)
+    //         .unwrap();
+    //     let proof = create_proof_with_reduction_and_matrices::<_, CircomReduction>(
+    //         &params,
+    //         r,
+    //         s,
+    //         &matrices,
+    //         num_inputs,
+    //         num_constraints,
+    //         full_assignment.as_slice(),
+    //     )
+    //     .unwrap();
+    //
+    //     let pvk = prepare_verifying_key(&params.vk);
+    //     let inputs = &full_assignment[1..num_inputs];
+    //     let verified = verify_proof(&pvk, &proof, inputs).unwrap();
+    //
+    //     assert!(verified);
+    // }
 }

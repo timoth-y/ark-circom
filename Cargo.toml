@@ -21,6 +21,11 @@ ark-poly = { version = "^0.3.0", default-features = false, features = ["parallel
 ark-relations = { version = "0.3.0", default-features = false }
 ark-serialize = { version = "0.3.0", default-features = false }
 
+ark-r1cs-std = { version = "0.3.0", default-features = false }
+ark-ed-on-bn254 = { version = "^0.3.0", features = ["r1cs"] }
+ark-bls12-381 = "0.3.0"
+ark-ed-on-bls12-381 = { version = "^0.3.0", features = ["r1cs"] }
+
 # decoding of data
 hex = "0.4.3"
 byteorder = "1.4.3"

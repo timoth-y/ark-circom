@@ -3,6 +3,8 @@ use color_eyre::Result;
 use num_bigint::BigInt;
 use num_traits::Zero;
 use std::cell::Cell;
+use std::collections::HashMap;
+use ark_ec::PairingEngine;
 use wasmer::{imports, Function, Instance, Memory, MemoryType, Module, RuntimeError, Store};
 
 #[cfg(feature = "circom-2")]
@@ -150,18 +152,18 @@ impl WitnessCalculator {
         }
     }
 
-    pub fn calculate_witness<I: IntoIterator<Item = (String, Vec<BigInt>)>>(
+    pub fn calculate_witness<E: PairingEngine, I: IntoIterator<Item = (String, Vec<(BigInt, Option<E::Fr>)>)>>(
         &mut self,
         inputs: I,
         sanity_check: bool,
-    ) -> Result<Vec<BigInt>> {
+    ) -> Result<Vec<(BigInt, Option<E::Fr>)>> {
         self.instance.init(sanity_check)?;
 
         cfg_if::cfg_if! {
             if #[cfg(feature = "circom-2")] {
                 match self.circom_version {
-                    2 => self.calculate_witness_circom2(inputs, sanity_check),
-                    1 => self.calculate_witness_circom1(inputs, sanity_check),
+                    2 => self.calculate_witness_circom2::<E,_>(inputs, sanity_check),
+                    //1 => self.calculate_witness_circom1(inputs, sanity_check),
                     _ => panic!("Unknown Circom version")
                 }
             } else {
@@ -214,20 +216,21 @@ impl WitnessCalculator {
 
     // Circom 2 feature flag with version 2
     #[cfg(feature = "circom-2")]
-    fn calculate_witness_circom2<I: IntoIterator<Item = (String, Vec<BigInt>)>>(
+    fn calculate_witness_circom2<E: PairingEngine, I: IntoIterator<Item = (String, Vec<(BigInt, Option<E::Fr>)>)>>(
         &mut self,
         inputs: I,
         sanity_check: bool,
-    ) -> Result<Vec<BigInt>> {
+    ) -> Result<Vec<(BigInt, Option<E::Fr>)>> {
         self.instance.init(sanity_check)?;
 
         let n32 = self.instance.get_field_num_len32()?;
+        let mut var_map = HashMap::new();
 
         // allocate the inputs
         for (name, values) in inputs.into_iter() {
             let (msb, lsb) = fnv(&name);
 
-            for (i, value) in values.into_iter().enumerate() {
+            for (i, (value, var)) in values.into_iter().enumerate() {
                 let f_arr = to_array32(&value, n32 as usize);
                 for j in 0..n32 {
                     self.instance.write_shared_rw_memory(
@@ -237,48 +240,56 @@ impl WitnessCalculator {
                 }
                 self.instance
                     .set_input_signal(msb as u32, lsb as u32, i as u32)?;
+                var_map.insert(i, var);
             }
         }
 
         let mut w = Vec::new();
 
         let witness_size = self.instance.get_witness_size()?;
+        let mut v = vec![None; witness_size as usize];
+
         for i in 0..witness_size {
             self.instance.get_witness(i)?;
             let mut arr = vec![0; n32 as usize];
             for j in 0..n32 {
                 arr[(n32 as usize) - 1 - (j as usize)] = self.instance.read_shared_rw_memory(j)?;
             }
-            w.push(from_array32(arr));
+            let val = from_array32(arr);
+            w.push(val);
+            let i = i as usize;
+            v[i] = var_map.remove(&i).map_or(None, |e| e);
         }
 
-        Ok(w)
+        Ok(w.into_iter().zip(v).collect())
     }
 
     pub fn calculate_witness_element<
         E: ark_ec::PairingEngine,
-        I: IntoIterator<Item = (String, Vec<BigInt>)>,
+        I: IntoIterator<Item = (String, Vec<(BigInt, Option<E::Fr>)>)>,
     >(
         &mut self,
         inputs: I,
         sanity_check: bool,
-    ) -> Result<Vec<E::Fr>> {
+    ) -> Result<(Vec<(E::Fr, bool)>)> {
         use ark_ff::{FpParameters, PrimeField};
-        let witness = self.calculate_witness(inputs, sanity_check)?;
+        let witness = self.calculate_witness::<E, _>(inputs, sanity_check)?;
         let modulus = <<E::Fr as PrimeField>::Params as FpParameters>::MODULUS;
 
         // convert it to field elements
         use num_traits::Signed;
         let witness = witness
             .into_iter()
-            .map(|w| {
+            .map(|(w, var)| {
                 let w = if w.sign() == num_bigint::Sign::Minus {
                     // Need to negate the witness element if negative
                     modulus.into() - w.abs().to_biguint().unwrap()
                 } else {
                     w.to_biguint().unwrap()
                 };
-                E::Fr::from(w)
+                let is_external = var.is_some();
+                let f = var.map_or(E::Fr::from(w), |v| v);
+                return (f, is_external)
             })
             .collect::<Vec<_>>();
 
