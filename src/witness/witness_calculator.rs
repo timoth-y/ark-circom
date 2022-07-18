@@ -3,6 +3,7 @@ use color_eyre::Result;
 use num_bigint::BigInt;
 use num_traits::Zero;
 use std::cell::Cell;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use ark_ec::PairingEngine;
 use wasmer::{imports, Function, Instance, Memory, MemoryType, Module, RuntimeError, Store};
@@ -211,6 +212,7 @@ impl WitnessCalculator {
 
         self.memory.set_free_pos(old_mem_free_pos);
 
+
         Ok(w)
     }
 
@@ -222,9 +224,11 @@ impl WitnessCalculator {
         sanity_check: bool,
     ) -> Result<Vec<(BigInt, Option<E::Fr>)>> {
         self.instance.init(sanity_check)?;
+        let p_sig_offset = self.memory.alloc_u32();
+
 
         let n32 = self.instance.get_field_num_len32()?;
-        let mut var_map = HashMap::new();
+        let mut vars = HashMap::new();
 
         // allocate the inputs
         for (name, values) in inputs.into_iter() {
@@ -240,14 +244,23 @@ impl WitnessCalculator {
                 }
                 self.instance
                     .set_input_signal(msb as u32, lsb as u32, i as u32)?;
-                var_map.insert(i, var);
+                match vars.entry((name.clone(), msb, lsb)) {
+                    Entry::Vacant(e) => { e.insert(vec![var]); },
+                    Entry::Occupied(mut e) => { e.get_mut().push(var); },
+                };
             }
         }
 
         let mut w = Vec::new();
-
         let witness_size = self.instance.get_witness_size()?;
+        println!("witness_size: {}", witness_size);
         let mut v = vec![None; witness_size as usize];
+
+        for ((name, msb, lsb), vs) in vars {
+            let pos = self.instance.get_signal_map_position(msb, lsb)? as usize - 1;
+            println!("map_pos({})=>{}", name, pos);
+            v[pos..pos+vs.len()].copy_from_slice(&vs);
+        }
 
         for i in 0..witness_size {
             self.instance.get_witness(i)?;
@@ -257,9 +270,10 @@ impl WitnessCalculator {
             }
             let val = from_array32(arr);
             w.push(val);
-            let i = i as usize;
-            v[i] = var_map.remove(&i).map_or(None, |e| e);
         }
+
+        println!("v: {} external of them: {}", v.len(), v.iter().filter(|e| e.is_some()).collect::<Vec<_>>().len());
+
 
         Ok(w.into_iter().zip(v).collect())
     }
@@ -275,6 +289,9 @@ impl WitnessCalculator {
         use ark_ff::{FpParameters, PrimeField};
         let witness = self.calculate_witness::<E, _>(inputs, sanity_check)?;
         let modulus = <<E::Fr as PrimeField>::Params as FpParameters>::MODULUS;
+
+        println!("witness calculated: {}, external of them {}", witness.len(), witness.iter().filter(|(_,e)| e.is_some()).collect::<Vec<_>>().len());
+
 
         // convert it to field elements
         use num_traits::Signed;

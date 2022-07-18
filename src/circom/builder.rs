@@ -40,7 +40,7 @@ impl<E: PairingEngine> CircomConfig<E> {
 }
 
 impl<E: PairingEngine, C: ProjectiveCurve> CircomBuilder<E, C>
-    where C::BaseField: From<E::Fr>, E::Fr: From<C::BaseField> {
+    where C::BaseField: From<E::Fr>, E::Fr: From<C::BaseField>, C::BaseField: ark_ff::PrimeField{
     /// Instantiates a new builder using the provided WitnessGenerator and R1CS files
     /// for your circuit
     pub fn new(cfg: CircomConfig<E>) -> Self {
@@ -89,23 +89,24 @@ impl<E: PairingEngine, C: ProjectiveCurve> CircomBuilder<E, C>
             .cfg
             .wtns
             .calculate_witness_element::<E, _>(self.inputs, self.cfg.sanity_check)?;
+        println!("witness size: {}, external of them {}",witness.len(), witness.iter().filter(|(_,e)| *e).collect::<Vec<_>>().len());
         circom.witness = Some(witness);
 
         // sanity check
-        // debug_assert!({
-        //     use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystem};
-        //     let cs = ConstraintSystem::<C::BaseField>::new_ref();
-        //     circom.clone().generate_constraints(cs.clone()).unwrap();
-        //     let is_satisfied = cs.is_satisfied().unwrap();
-        //     if !is_satisfied {
-        //         println!(
-        //             "Unsatisfied constraint: {:?}",
-        //             cs.which_is_unsatisfied().unwrap()
-        //         );
-        //     }
-        //
-        //     is_satisfied
-        // });
+        debug_assert!({
+            use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystem};
+            let cs = ConstraintSystem::<C::BaseField>::new_ref();
+            circom.clone().generate_constraints(cs.clone()).unwrap();
+            let is_satisfied = cs.is_satisfied().unwrap();
+            if !is_satisfied {
+                println!(
+                    "Unsatisfied constraint: {:?}",
+                    cs.which_is_unsatisfied().unwrap()
+                );
+            }
+
+            is_satisfied
+        });
 
         Ok(circom)
     }

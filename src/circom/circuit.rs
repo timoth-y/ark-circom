@@ -62,7 +62,6 @@ impl<'a, E: PairingEngine, C: ProjectiveCurve> CircomCircuit<E, C>
                     Ok(f)
                 })?;
             }
-
         }
 
         let mut external_witnesses = vec![];
@@ -92,11 +91,8 @@ impl<'a, E: PairingEngine, C: ProjectiveCurve> CircomCircuit<E, C>
 
         Ok((external_inputs, external_witnesses))
     }
-}
 
-impl<E: PairingEngine, C: ProjectiveCurve> ConstraintSynthesizer<C::BaseField> for CircomCircuit<E, C>
-    where <C as ProjectiveCurve>::BaseField: From<<E as PairingEngine>::Fr> {
-    fn generate_constraints(self, cs: ConstraintSystemRef<C::BaseField>) -> Result<(), SynthesisError> {
+    pub fn verify_linear_combinations(&self, cs: ConstraintSystemRef<C::BaseField>) -> Result<(), SynthesisError> {
         let make_index = |index| {
             if index < self.r1cs.num_inputs {
                 Variable::Instance(index)
@@ -123,6 +119,17 @@ impl<E: PairingEngine, C: ProjectiveCurve> ConstraintSynthesizer<C::BaseField> f
         }
 
         Ok(())
+    }
+}
+
+impl<E: PairingEngine, C: ProjectiveCurve> ConstraintSynthesizer<C::BaseField> for CircomCircuit<E, C>
+    where
+        <C as ProjectiveCurve>::BaseField: From<<E as PairingEngine>::Fr>,
+        C::BaseField: ark_ff::PrimeField {
+    fn generate_constraints(self, cs: ConstraintSystemRef<C::BaseField>) -> Result<(), SynthesisError> {
+        let _ = self.allocate_variables(cs.clone())?;
+
+        self.verify_linear_combinations(cs.clone())
     }
 }
 
