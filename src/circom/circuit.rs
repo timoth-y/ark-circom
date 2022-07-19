@@ -1,3 +1,5 @@
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use ark_ec::{PairingEngine, ProjectiveCurve};
 use ark_r1cs_std::alloc::AllocVar;
@@ -16,8 +18,8 @@ use num_traits::One;
 #[derive(Clone, Debug)]
 pub struct CircomCircuit<E: PairingEngine, C: ProjectiveCurve> {
     pub r1cs: R1CS<E>,
-    pub witness: Option<Vec<(E::Fr, bool)>>,
-    pub(crate) _twisted_curve: PhantomData<C>
+    pub witness: Option<Vec<(Option<String>, E::Fr)>>,
+    pub(crate) _twisted_curve: PhantomData<C>,
 }
 
 impl<'a, E: PairingEngine, C: ProjectiveCurve> CircomCircuit<E, C>
@@ -29,62 +31,64 @@ impl<'a, E: PairingEngine, C: ProjectiveCurve> CircomCircuit<E, C>
         match &self.witness {
             None => None,
             Some(w) => match &self.r1cs.wire_mapping {
-                None => Some(w[1..self.r1cs.num_inputs].to_vec().into_iter().map(|(f, _)| f).collect()),
-                Some(m) => Some(m[1..self.r1cs.num_inputs].iter().map(|i| w[*i].0).collect()),
+                None => Some(w[1..self.r1cs.num_inputs].to_vec().into_iter().map(|(_, f)| f).collect()),
+                Some(m) => Some(m[1..self.r1cs.num_inputs].iter().map(|i| w[*i].1).collect()),
             },
         }
     }
 
-    pub fn allocate_variables(&self, cs: ConstraintSystemRef<C::BaseField>) -> Result<(Vec<FpVar<C::BaseField>>, Vec<FpVar<C::BaseField>>), SynthesisError> {
+    pub fn allocate_variables(&self, cs: ConstraintSystemRef<C::BaseField>) -> Result<(
+        HashMap<String, Vec<FpVar<C::BaseField>>>,
+        HashMap<String, Vec<FpVar<C::BaseField>>>,
+    ), SynthesisError> {
         let witness = &self.witness;
         let wire_mapping = &self.r1cs.wire_mapping;
 
-        let mut external_inputs = vec![];
+        let mut external_inputs = HashMap::new();
 
         // Start from 1 because Arkworks implicitly allocates One for the first input
         for i in 1..self.r1cs.num_inputs {
-            let (f, is_external) = match witness {
-                None => (E::Fr::one(), false),
+            let (varname, fr) = match witness {
+                None => (None, E::Fr::one()),
                 Some(w) => match wire_mapping {
-                    Some(m) => w[m[i]],
-                    None => w[i],
+                    Some(m) => w[m[i + self.r1cs.num_inputs]].clone(),
+                    None => w[i + self.r1cs.num_inputs].clone(),
                 },
             };
-            let f: C::BaseField = f.into();
-            if is_external {
-                external_inputs.push(
-                    FpVar::<C::BaseField>::new_input(ns!(cs, "plaintext"), || {
-                        Ok(f)
-                    })?
-                )
+            let fr: C::BaseField = fr.into();
+            if let Some(varname) = varname {
+                let var = FpVar::<C::BaseField>::new_input(ns!(cs, "circom_ark_binding"), || Ok(fr))?;
+                match external_inputs.entry(varname) {
+                    Entry::Vacant(e) => { e.insert(vec![var]); },
+                    Entry::Occupied(mut e) => { e.get_mut().push(var); }
+                };
             } else {
                 cs.new_input_variable(|| {
-                    Ok(f)
+                    Ok(fr)
                 })?;
             }
         }
 
-        let mut external_witnesses = vec![];
+        let mut external_witnesses = HashMap::new();
 
         for i in 0..self.r1cs.num_aux {
-            let (f, is_external) = match witness {
-                None => (E::Fr::one(), false),
+            let (varname, fr) = match witness {
+                None => (None, E::Fr::one()),
                 Some(w) => match wire_mapping {
-                    Some(m) => w[m[i + self.r1cs.num_inputs]],
-                    None => w[i + self.r1cs.num_inputs],
+                    Some(m) => w[m[i + self.r1cs.num_inputs]].clone(),
+                    None => w[i + self.r1cs.num_inputs].clone(),
                 },
             };
-            let f: C::BaseField = f.into();
-
-            if is_external {
-                external_witnesses.push(
-                    FpVar::<C::BaseField>::new_witness(ns!(cs, "plaintext"), || {
-                        Ok(f)
-                    })?
-                )
+            let fr: C::BaseField = fr.into();
+            if let Some(varname) = varname {
+                let var = FpVar::<C::BaseField>::new_witness(ns!(cs, "circom_ark_binding"), || Ok(fr))?;
+                match external_witnesses.entry(varname) {
+                    Entry::Vacant(e) => { e.insert(vec![var]); },
+                    Entry::Occupied(mut e) => { e.get_mut().push(var); }
+                }
             } else {
                 cs.new_witness_variable(|| {
-                    Ok(f)
+                    Ok(fr)
                 })?;
             }
         }
@@ -147,7 +151,7 @@ mod tests {
             "./test-vectors/mycircuit.wasm",
             "./test-vectors/mycircuit.r1cs",
         )
-        .unwrap();
+            .unwrap();
         let mut builder = CircomBuilder::<_, EdwardsProjective>::new(cfg);
         builder.push_input("a", 3);
         builder.push_input("b", 11);

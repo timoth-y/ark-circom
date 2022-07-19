@@ -157,7 +157,7 @@ impl WitnessCalculator {
         &mut self,
         inputs: I,
         sanity_check: bool,
-    ) -> Result<Vec<(BigInt, Option<E::Fr>)>> {
+    ) -> Result<Vec<(BigInt, Option<(String, E::Fr)>)>> {
         self.instance.init(sanity_check)?;
 
         cfg_if::cfg_if! {
@@ -222,16 +222,16 @@ impl WitnessCalculator {
         &mut self,
         inputs: I,
         sanity_check: bool,
-    ) -> Result<Vec<(BigInt, Option<E::Fr>)>> {
+    ) -> Result<Vec<(BigInt, Option<(String, E::Fr)>)>> {
         self.instance.init(sanity_check)?;
         let p_sig_offset = self.memory.alloc_u32();
 
 
         let n32 = self.instance.get_field_num_len32()?;
-        let mut vars = HashMap::new();
+        let mut inputsMap = HashMap::new();
 
         // allocate the inputs
-        for (name, values) in inputs.into_iter() {
+        for (name, values) in inputs {
             let (msb, lsb) = fnv(&name);
 
             for (i, (value, var)) in values.into_iter().enumerate() {
@@ -242,24 +242,22 @@ impl WitnessCalculator {
                         f_arr[(n32 as usize) - 1 - (j as usize)],
                     )?;
                 }
-                self.instance
-                    .set_input_signal(msb as u32, lsb as u32, i as u32)?;
-                match vars.entry((name.clone(), msb, lsb)) {
-                    Entry::Vacant(e) => { e.insert(vec![var]); },
-                    Entry::Occupied(mut e) => { e.get_mut().push(var); },
+                self.instance.set_input_signal(msb as u32, lsb as u32, i as u32)?;
+                let kvp = var.map(|v| (name.clone(), v));
+                match inputsMap.entry((msb, lsb)) {
+                    Entry::Vacant(e) => { e.insert(vec![kvp]); },
+                    Entry::Occupied(mut e) => { e.get_mut().push(kvp); },
                 };
             }
         }
 
         let mut w = Vec::new();
         let witness_size = self.instance.get_witness_size()?;
-        println!("witness_size: {}", witness_size);
         let mut v = vec![None; witness_size as usize];
 
-        for ((name, msb, lsb), vs) in vars {
+        for ((msb, lsb), vs) in inputsMap {
             let pos = self.instance.get_signal_map_position(msb, lsb)? as usize - 1;
-            println!("map_pos({})=>{}", name, pos);
-            v[pos..pos+vs.len()].copy_from_slice(&vs);
+            v[pos..pos+vs.len()].clone_from_slice(&vs);
         }
 
         for i in 0..witness_size {
@@ -272,9 +270,6 @@ impl WitnessCalculator {
             w.push(val);
         }
 
-        println!("v: {} external of them: {}", v.len(), v.iter().filter(|e| e.is_some()).collect::<Vec<_>>().len());
-
-
         Ok(w.into_iter().zip(v).collect())
     }
 
@@ -285,13 +280,10 @@ impl WitnessCalculator {
         &mut self,
         inputs: I,
         sanity_check: bool,
-    ) -> Result<(Vec<(E::Fr, bool)>)> {
+    ) -> Result<(Vec<(Option<String>, E::Fr)>)> {
         use ark_ff::{FpParameters, PrimeField};
         let witness = self.calculate_witness::<E, _>(inputs, sanity_check)?;
         let modulus = <<E::Fr as PrimeField>::Params as FpParameters>::MODULUS;
-
-        println!("witness calculated: {}, external of them {}", witness.len(), witness.iter().filter(|(_,e)| e.is_some()).collect::<Vec<_>>().len());
-
 
         // convert it to field elements
         use num_traits::Signed;
@@ -304,9 +296,7 @@ impl WitnessCalculator {
                 } else {
                     w.to_biguint().unwrap()
                 };
-                let is_external = var.is_some();
-                let f = var.map_or(E::Fr::from(w), |v| v);
-                return (f, is_external)
+                return var.map_or((None, E::Fr::from(w)), |(varname, f)| (Some(varname), f))
             })
             .collect::<Vec<_>>();
 

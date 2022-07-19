@@ -89,7 +89,6 @@ impl<E: PairingEngine, C: ProjectiveCurve> CircomBuilder<E, C>
             .cfg
             .wtns
             .calculate_witness_element::<E, _>(self.inputs, self.cfg.sanity_check)?;
-        println!("witness size: {}, external of them {}",witness.len(), witness.iter().filter(|(_,e)| *e).collect::<Vec<_>>().len());
         circom.witness = Some(witness);
 
         // sanity check
