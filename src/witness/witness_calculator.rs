@@ -3,6 +3,7 @@ use color_eyre::Result;
 use num_bigint::BigInt;
 use num_traits::Zero;
 use std::cell::Cell;
+use std::cmp::{max, min};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use ark_ec::PairingEngine;
@@ -257,7 +258,11 @@ impl WitnessCalculator {
 
         for ((msb, lsb), vs) in inputsMap {
             let pos = self.instance.get_signal_map_position(msb, lsb)? as usize - 1;
-            v[pos..pos+vs.len()].clone_from_slice(&vs);
+            if pos >= w.len() {
+                continue
+            }
+            let upper = min(pos+vs.len(), w.len());
+            v[pos..upper].clone_from_slice(&vs);
         }
 
         for i in 0..witness_size {
