@@ -36,6 +36,8 @@ pub trait Circom2 {
     fn set_input_signal(&self, hmsb: u32, hlsb: u32, pos: u32) -> Result<()>;
     fn get_witness(&self, i: u32) -> Result<()>;
     fn get_witness_size(&self) -> Result<u32>;
+    fn get_signal_map_position(&self, hmsb: u32, hlsb: u32) -> Result<u32>;
+    fn get_signal_size(&self, hmsb: u32, hlsb: u32) -> Result<u32>;
 }
 
 impl Circom for Wasm {
@@ -82,6 +84,18 @@ impl Circom2 for Wasm {
         let func = self.func("getWitness");
         func.call(&[i.into()])?;
         Ok(())
+    }
+
+    fn get_signal_map_position(&self, hmsb: u32, hlsb: u32) -> Result<u32> {
+        let func = self.func("getInputSignalPositionByHash");
+        let result = func.call(&[hmsb.into(), hlsb.into()])?;
+        Ok(result[0].unwrap_i32() as u32)
+    }
+
+    fn get_signal_size(&self, hmsb: u32, hlsb: u32) -> Result<u32> {
+        let func = self.func("getInputSignalSize");
+        let result = func.call(&[hmsb.into(), hlsb.into()])?;
+        Ok(result[0].unwrap_i32() as u32)
     }
 
     fn get_witness_size(&self) -> Result<u32> {

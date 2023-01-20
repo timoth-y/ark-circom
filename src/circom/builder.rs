@@ -1,18 +1,21 @@
-use ark_ec::PairingEngine;
+use ark_ec::{PairingEngine, ProjectiveCurve};
 use std::{fs::File, path::Path};
 
 use super::{CircomCircuit, R1CS};
 
-use num_bigint::BigInt;
+use num_bigint::{BigInt, Sign};
 use std::collections::HashMap;
+use std::marker::PhantomData;
+use ark_ff::to_bytes;
 
 use crate::{circom::R1CSFile, witness::WitnessCalculator};
 use color_eyre::Result;
 
 #[derive(Clone, Debug)]
-pub struct CircomBuilder<E: PairingEngine> {
+pub struct CircomBuilder<E: PairingEngine, C: ProjectiveCurve> {
     pub cfg: CircomConfig<E>,
-    pub inputs: HashMap<String, Vec<BigInt>>,
+    pub inputs: HashMap<String, Vec<(BigInt, Option<E::Fr>)>>,
+    _twisted_curve: PhantomData<C>
 }
 
 // Add utils for creating this from files / directly from bytes
@@ -36,28 +39,38 @@ impl<E: PairingEngine> CircomConfig<E> {
     }
 }
 
-impl<E: PairingEngine> CircomBuilder<E> {
+impl<E: PairingEngine, C: ProjectiveCurve> CircomBuilder<E, C>
+    where C::BaseField: From<E::Fr>, E::Fr: From<C::BaseField>, C::BaseField: ark_ff::PrimeField{
     /// Instantiates a new builder using the provided WitnessGenerator and R1CS files
     /// for your circuit
     pub fn new(cfg: CircomConfig<E>) -> Self {
         Self {
             cfg,
             inputs: HashMap::new(),
+            _twisted_curve: PhantomData
         }
     }
 
     /// Pushes a Circom input at the specified name.
     pub fn push_input<T: Into<BigInt>>(&mut self, name: impl ToString, val: T) {
         let values = self.inputs.entry(name.to_string()).or_insert_with(Vec::new);
-        values.push(val.into());
+        values.push((val.into(), None));
+    }
+
+    /// Pushes a Circom input at the specified name.
+    pub fn push_variable(&mut self, name: impl ToString, var: C::BaseField) {
+        let values = self.inputs.entry(name.to_string()).or_insert_with(Vec::new);
+        let val = BigInt::from_bytes_le(Sign::Plus, &to_bytes!(var).unwrap());
+        values.push((val, Some(var.into())));
     }
 
     /// Generates an empty circom circuit with no witness set, to be used for
     /// generation of the trusted setup parameters
-    pub fn setup(&self) -> CircomCircuit<E> {
+    pub fn setup(&self) -> CircomCircuit<E, C> {
         let mut circom = CircomCircuit {
             r1cs: self.cfg.r1cs.clone(),
             witness: None,
+            _twisted_curve: PhantomData
         };
 
         // Disable the wire mapping
@@ -68,7 +81,7 @@ impl<E: PairingEngine> CircomBuilder<E> {
 
     /// Creates the circuit populated with the witness corresponding to the previously
     /// provided inputs
-    pub fn build(mut self) -> Result<CircomCircuit<E>> {
+    pub fn build(mut self) -> Result<CircomCircuit<E, C>> {
         let mut circom = self.setup();
 
         // calculate the witness
@@ -81,7 +94,7 @@ impl<E: PairingEngine> CircomBuilder<E> {
         // sanity check
         debug_assert!({
             use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystem};
-            let cs = ConstraintSystem::<E::Fr>::new_ref();
+            let cs = ConstraintSystem::<C::BaseField>::new_ref();
             circom.clone().generate_constraints(cs.clone()).unwrap();
             let is_satisfied = cs.is_satisfied().unwrap();
             if !is_satisfied {
